@@ -1,0 +1,220 @@
+// SPDX-License-Identifier: GPL-3.0
+pragma solidity ^0.8.0;
+
+contract IndoorSportFacilitiesBookingSystem {
+    // Struct to represent a facility
+    struct Facility {
+        string name; //The name of facility
+        bool isAvailable;//Availability of facility
+        uint256 ratePerDay;//Price of facility per day
+        address owner;//Owner wallet address
+    }
+
+    // Struct to represent a booking
+    struct Booking {
+        address customer;//Customer wallet address
+        string facilityName;//Store name of facility that customer book
+        uint256 dateOfBooking; //Store date of booking
+        uint256 totalCharge;// Store total price that paid
+        string userNameCust;// Store customer's name
+        string emailAddressCust;//Store customer address
+    }
+
+    // Struct to represent a time slot
+    struct TimeSlot {
+        bool isBooked;//Check the facility is booked or not
+        address bookedBy;//Store wallet's address of customer
+    }
+
+    // Mapping to store facilities by name
+    mapping(string => Facility) public facilities;
+    // Mapping to store customer bookings by address
+    mapping(address => Booking[]) public customerBookings;
+    // Mapping to store time slots for facilities
+    mapping(string => mapping(uint256 => TimeSlot)) public facilityTimeSlots; 
+    // Mapping to store bookings for each facility and date
+    mapping(string => mapping(uint256 => Booking[])) public facilityBookings;
+    // Array to store facility names
+    string[] public facilitiesByIndex;
+    event BookingMade(address indexed customer, string facilityName, uint indexed dateOfBooking, uint totalCharge);
+
+
+    // Address of the owner
+    address public owner = 0xb3Fe34532eFcd86702C690d762cd0aa5EC3a8E0c;
+
+    // Modifier to restrict certain functions to the owner
+    modifier onlyOwner() {
+        require(msg.sender == owner, "Only the owner can call this function");
+        _;
+    }
+
+    // Constructor to initialize facilities and owner
+    constructor() {
+        addNewFacility("Basketball Court", 1);
+        addNewFacility("Tennis Court", 1);
+        addNewFacility("Swimming Pool", 1);
+        addNewFacility("Gym", 1);
+        addNewFacility("Soccer Field", 1);
+
+        owner = msg.sender;
+    }
+
+    // Function to get owner address
+    function getOwnerWalletAddress() public view returns (address) {
+        return owner;
+    }
+    // ------------------------------Owner Sections-----------------------------------------
+     
+     
+     // Function to get all facility names
+     function getAllFacilityNames() public view returns (string[] memory) {
+        return facilitiesByIndex;
+        }
+        
+     
+     // Function to get the price of a specific facility
+     function getFacilityPrice(string memory facilityName) public view returns (uint256) {
+        // Ensure that the facility exists
+        require(facilityExists(facilityName), "Facility not found");
+            
+        // Return the price of the facility
+        return facilities[facilityName].ratePerDay;
+        }
+
+     // Function to add a new facility
+     function addNewFacility(string memory facilityName, uint256 price) public onlyOwner {
+        // Ensure that the facility name is not empty
+        require(bytes(facilityName).length > 0, "Facility name cannot be empty");
+
+        // Ensure that a facility with the same name does not already exist
+        require(!facilityExists(facilityName), "Facility with the same name already exists");
+
+        // Create a new facility with the provided name, price, and owner
+        facilities[facilityName] = Facility(facilityName, true, price, msg.sender);
+
+        // Add the facility name to the list of facilities
+        facilitiesByIndex.push(facilityName);
+        }
+
+
+
+      // Function to get all bookings for a specific date
+     function viewBookingsByDate(uint256 dateOfBooking) public view returns (Booking[] memory) {
+     
+     // Create a dynamic array to store bookings for the specific date
+     Booking[] memory bookingsForDate;
+
+     // Iterate through all facilities
+     for (uint i = 0; i < facilitiesByIndex.length; i++) {
+        string memory facilityName = facilitiesByIndex[i];
+
+        // Check if the facility has bookings for the specified date
+        if (facilityTimeSlots[facilityName][dateOfBooking].isBooked) {
+            // Retrieve the customer address for the booked slot
+            address customerAddress = facilityTimeSlots[facilityName][dateOfBooking].bookedBy;
+
+            // Iterate through the customer's bookings for the specified facility and date
+            Booking[] storage customerBookingsForFacility = customerBookings[customerAddress];
+            for (uint j = 0; j < customerBookingsForFacility.length; j++) {
+                Booking memory booking = customerBookingsForFacility[j];
+
+                // Check if the booking matches the facility and date
+                if (keccak256(abi.encodePacked(booking.facilityName)) == keccak256(abi.encodePacked(facilityName)) &&
+                    booking.dateOfBooking == dateOfBooking) {
+                    // Add the facility name to the booking
+                    booking.facilityName = facilityName;
+
+                    // Add the booking to the array
+                    bookingsForDate = appendBooking(bookingsForDate, booking);
+                }
+            }
+        }
+    }
+
+       return bookingsForDate;
+     }
+
+
+     // Internal function to append a booking to an array
+     function appendBooking(Booking[] memory arr, Booking memory booking) internal pure returns (Booking[] memory) {
+        Booking[] memory newArr = new Booking[](arr.length + 1);
+        for (uint i = 0; i < arr.length; i++) {
+            newArr[i] = arr[i];
+        }
+        newArr[arr.length] = booking;
+        return newArr;
+     }
+
+
+     // Function to remove a facility (only owner)
+     function removeFacility(string memory facilityName) public onlyOwner {
+         require(facilityExists(facilityName), "Facility not found");
+         delete facilities[facilityName];
+
+         //Update the array of facilitiesByIndex
+        for (uint i = 0; i < facilitiesByIndex.length; i++) {
+            if (keccak256(abi.encodePacked(facilitiesByIndex[i])) == keccak256(abi.encodePacked(facilityName))) {
+                for (uint j = i; j < facilitiesByIndex.length - 1; j++) {
+                    facilitiesByIndex[j] = facilitiesByIndex[j + 1];
+                }
+                facilitiesByIndex.pop();
+                break;
+            }
+        }
+     }
+
+     // Function to update the price of a facility (only owner)
+     function updateFacilityPrice(string memory facilityName, uint256 price) public onlyOwner {
+        require(facilityExists(facilityName), "Facility not found");
+        facilities[facilityName].ratePerDay = price;
+     }
+
+// -----------------------------Customer Section---------------------------------------
+     // Function to book a facility   
+     function bookFacility(string memory facilityName, uint256 dateOfBooking, string memory userName, string memory emailAddress) public payable {
+        
+        require(facilityExists(facilityName), "Facility not found");
+        
+        // Check if the facility is available for the selected date
+        require(checkFacilityAvailability(facilityName, dateOfBooking), "Facility is fully booked for the selected date");
+
+        // Check if the customer has provided sufficient funds for the booking
+        require(msg.value >= facilities[facilityName].ratePerDay, "Insufficient funds");
+
+       // Create a new booking with customer details, booking ID, facility name, date, payment, and contact information
+       Booking memory newBooking = Booking(msg.sender, facilityName, dateOfBooking, msg.value, userName, emailAddress);
+
+       // Transfer the funds to the owner's wallet
+       payable(owner).transfer(msg.value);
+
+       // Mark the facility as unavailable for the selected date
+       facilities[facilityName].isAvailable = false;
+
+      // Add the new booking to the customer's booking list
+      customerBookings[msg.sender].push(newBooking);
+
+      // Mark the booked time slot for the facility with the customer's address
+      facilityTimeSlots[facilityName][dateOfBooking] = TimeSlot(true, msg.sender);
+
+    // Emit an event for logging
+      emit BookingMade(msg.sender, facilityName, dateOfBooking, msg.value);
+
+      
+    }
+
+    // Function to check if a facility is available for booking on a specific date
+    function checkFacilityAvailability(string memory facilityName, uint256 dateOfBooking) public view returns (bool) {
+        return !facilityTimeSlots[facilityName][dateOfBooking].isBooked;
+    }
+
+    // Function to check if a facility exists
+    function facilityExists(string memory facilityName) internal view returns (bool) {
+        return bytes(facilities[facilityName].name).length > 0;
+    }
+
+    // Function to view bookings of the calling customer
+     function viewCustomerBookings() public view returns (Booking[] memory) {
+        return customerBookings[msg.sender];
+      }
+
+}
